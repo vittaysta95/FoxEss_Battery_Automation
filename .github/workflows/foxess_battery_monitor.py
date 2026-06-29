@@ -179,7 +179,7 @@ def main():
     print(f"Status: {'Already switched to Self Use' if already_switched else 'Normal monitoring'}")
     
     # Between 6pm-8pm: Monitor and switch if needed
-    if 18 <= current_hour < 20:
+    if 18 <= current_hour < 21:
         print(f"\n⏰ Monitoring window (6pm-8pm)")
         
         if already_switched:
