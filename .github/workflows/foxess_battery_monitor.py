@@ -1,45 +1,56 @@
 import os
 import sys
 import json
-import hmac
 import hashlib
 import requests
 from datetime import datetime
-from urllib.parse import urlencode
 import pytz
+import time
 
 class FoxESSAPI:
-    def __init__(self, api_key, sn, secret):
+    def __init__(self, api_key, sn):
         self.api_key = api_key
         self.sn = sn
-        self.secret = secret
         self.base_url = "https://www.foxesscloud.com/api"
     
-    def _sign_request(self, path, params):
-        """Generate HMAC-MD5 signature for FoxESS API"""
-        string_to_sign = path + urlencode(sorted(params.items()))
-        signature = hmac.new(
-            self.secret.encode(),
-            string_to_sign.encode(),
-            hashlib.md5
-        ).hexdigest()
-        return signature
+    def _get_signature(self, path):
+        """
+        Calculate signature according to FoxESS official docs:
+        signature = MD5(url + "\r\n" + token + "\r\n" + timestamp)
+        """
+        timestamp = str(int(time.time() * 1000))  # Current time in milliseconds
+        
+        # String to sign: path + \r\n + token + \r\n + timestamp
+        string_to_sign = path + "\r\n" + self.api_key + "\r\n" + timestamp
+        
+        # MD5 hash (NOT HMAC!)
+        signature = hashlib.md5(string_to_sign.encode()).hexdigest()
+        
+        return signature, timestamp
     
     def get_soc(self):
         """Get current battery state of charge"""
         path = "/device/queryDeviceById"
-        params = {
-            "sn": self.sn,
-            "appVersion": "4.0.0",
+        signature, timestamp = self._get_signature(path)
+        
+        # Pass signature as headers, NOT URL parameters
+        headers = {
+            "token": self.api_key,
+            "timestamp": timestamp,
+            "signature": signature,
             "lang": "en"
         }
-        params["sign"] = self._sign_request(path, params)
-        params["token"] = self.api_key
+        
+        params = {
+            "sn": self.sn,
+            "appVersion": "4.0.0"
+        }
         
         try:
             response = requests.get(
                 f"{self.base_url}{path}",
                 params=params,
+                headers=headers,
                 timeout=10
             )
             response.raise_for_status()
@@ -50,18 +61,29 @@ class FoxESSAPI:
                 print(f"✓ Retrieved SOC: {soc}%")
                 return float(soc)
             else:
-                raise Exception(f"API error: {data.get('msg')}")
+                error_msg = data.get("msg", "Unknown error")
+                print(f"✗ API error: {error_msg}", file=sys.stderr)
+                return None
         except Exception as e:
             print(f"✗ Error getting SOC: {e}", file=sys.stderr)
             return None
     
     def set_battery_mode(self, mode):
         """
-        Set battery mode
+        Set battery mode using device settings endpoint
         mode: "Self-use" or "Scheduler"
         """
         path = "/device/setBattery"
-        params = {
+        signature, timestamp = self._get_signature(path)
+        
+        headers = {
+            "token": self.api_key,
+            "timestamp": timestamp,
+            "signature": signature,
+            "lang": "en"
+        }
+        
+        data = {
             "sn": self.sn,
             "batHighestCap": 100,
             "batLowestCap": 20,
@@ -69,23 +91,24 @@ class FoxESSAPI:
             "batDischargePower": 3000,
             "batWorkMode": mode
         }
-        params["sign"] = self._sign_request(path, params)
-        params["token"] = self.api_key
         
         try:
             response = requests.post(
                 f"{self.base_url}{path}",
-                data=params,
+                data=data,
+                headers=headers,
                 timeout=10
             )
             response.raise_for_status()
-            data = response.json()
+            data_response = response.json()
             
-            if data.get("code") == 0:
+            if data_response.get("code") == 0:
                 print(f"✓ Mode set to: {mode}")
                 return True
             else:
-                raise Exception(f"API error: {data.get('msg')}")
+                error_msg = data_response.get("msg", "Unknown error")
+                print(f"✗ API error: {error_msg}", file=sys.stderr)
+                return False
         except Exception as e:
             print(f"✗ Error setting mode: {e}", file=sys.stderr)
             return False
@@ -153,15 +176,14 @@ def main():
     # Load from environment
     api_key = os.environ.get("FOXESS_API_KEY")
     sn = os.environ.get("FOXESS_SN")
-    secret = os.environ.get("FOXESS_SECRET")
     ntfy_topic = os.environ.get("NTFY_TOPIC")
     
-    if not all([api_key, sn, secret, ntfy_topic]):
+    if not all([api_key, sn, ntfy_topic]):
         print("✗ Missing required environment variables", file=sys.stderr)
         sys.exit(1)
     
     # Initialize
-    fox = FoxESSAPI(api_key, sn, secret)
+    fox = FoxESSAPI(api_key, sn)
     
     # Load state
     state = reset_daily_state()
@@ -194,7 +216,7 @@ def main():
             
             print(f"SOC: {soc}%")
             
-            if soc < 60:
+            if soc < 40:
                 print(f"⚠️  SOC LOW ({soc}%) - Attempting to switch to Self Use...")
                 success = fox.set_battery_mode("Self-use")
                 
