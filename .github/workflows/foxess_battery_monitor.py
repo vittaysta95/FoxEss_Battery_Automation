@@ -3,6 +3,7 @@ import sys
 import json
 import requests
 from datetime import datetime
+import pytz
 
 class FoxESSAPI:
     def __init__(self, api_key, sn):
@@ -157,9 +158,11 @@ def main():
     
     print("\n--- FoxESS Battery Monitor ---")
     
-    current_hour = datetime.now().hour
-    current_minute = datetime.now().minute
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    sydney_tz = pytz.timezone('Australia/Sydney')
+    now = datetime.now(sydney_tz)
+    current_hour = now.hour
+    current_minute = now.minute
+    timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
     
     print(f"Time: {timestamp}")
     print(f"Status: {'Already switched to Self Use' if already_switched else 'Normal monitoring'}")
