@@ -180,7 +180,7 @@ def main():
             
             print(f"SOC: {soc}%")
             
-            if soc < 40:
+            if soc < 60:
                 print(f"⚠️  SOC LOW ({soc}%) - Attempting to switch to Self Use...")
                 success = fox.attempt_set_battery_mode("Self-use")
                 
